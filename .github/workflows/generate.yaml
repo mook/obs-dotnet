@@ -1,0 +1,60 @@
+name: Generate OBS Project
+on:
+  push:
+    branches: main
+  workflow_dispatch: {}
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    container:
+      image: registry.opensuse.org/opensuse/leap:latest
+      env:
+        PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    permissions:
+      contents: write
+    steps:
+    - name: Install tools
+      run: >-
+        zypper --non-interactive install
+        git
+        rpmrebuild
+        tar
+    - uses: actions/checkout@v4
+      with:
+        path: src
+        persist-credentials: false
+    - uses: actions/checkout@v4
+      with:
+        path: out
+        ref: generated
+        fetch-depth: 0
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: src/generate-packages/go.mod
+        cache-dependency-path: src/generate-packages/go.sum
+    - name: Build generator
+      run: go build -o ../../generate-packages
+      working-directory: src/generate-packages
+    - name: Regenerate
+      run: ../generate-packages
+      working-directory: out
+    - name: Commit changes
+      working-directory: out
+      env:
+        GIT_CONFIG_COUNT: 2
+        GIT_CONFIG_KEY_0: user.name
+        GIT_CONFIG_VALUE_0: GitHub Actions
+        GIT_CONFIG_KEY_1: user.email
+        GIT_CONFIG_VALUE_1: nobody@nowhere.invalid
+      run: |
+        git add .
+
+        git status --ignored
+
+        if git diff-index --exit-code --stat --cached HEAD; then
+          echo "No changes found"
+          exit 0
+        fi
+
+        git commit --amend --message="Automated commit"
+        git push --force origin generated

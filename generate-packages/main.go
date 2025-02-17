@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/mook/obs-dotnet/generate-packages/pkg/httpfs"
@@ -40,7 +41,7 @@ func (w *packageWriter) write(ctx context.Context, pkgs []*repomd.PrimaryPackage
 	w.Do(func() {
 		slog.Debug("Download", "pkg", w.pkg)
 		group.Go(func() error {
-			pkgDir, err := filepath.Abs(filepath.Join("..", w.pkg.Name))
+			pkgDir, err := filepath.Abs(w.pkg.Name)
 			if err != nil {
 				return err
 			}
@@ -199,6 +200,14 @@ func findPackage(pkgs []*repomd.PrimaryPackage, entry rpm.Entry) *repomd.Primary
 
 func run(ctx context.Context) error {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to find executable: %w", err)
+	}
+	if strings.Contains(exe, "go-build") {
+		// Assume this is `go run`
+		os.Chdir("..")
+	}
 	fs, err := httpfs.NewHttpFs(repository)
 	if err != nil {
 		return fmt.Errorf("error creating fs: %w", err)
