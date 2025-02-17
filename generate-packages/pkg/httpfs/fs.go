@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func NewHttpFs(baseURL string) (fs.FS, error) {
+func NewHttpFs(baseURL string) (*HttpFs, error) {
 	parsedURL, err := url.ParseRequestURI(baseURL)
 	if err != nil {
 		return nil, err
@@ -24,6 +24,10 @@ type HttpFs struct {
 	base *url.URL
 }
 
+func (h *HttpFs) BuildURL(name string) *url.URL {
+	return h.base.JoinPath(name)
+}
+
 // Open implements fs.FS.
 func (h *HttpFs) Open(name string) (fs.File, error) {
 	if !fs.ValidPath(name) {
@@ -33,7 +37,7 @@ func (h *HttpFs) Open(name string) (fs.File, error) {
 			Err:  fs.ErrInvalid,
 		}
 	}
-	fileURL := h.base.JoinPath(name).String()
+	fileURL := h.BuildURL(name).String()
 	slog.Debug("open httpfs", "url", fileURL)
 	resp, err := http.Get(fileURL)
 	if err != nil {
