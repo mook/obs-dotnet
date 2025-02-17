@@ -1,0 +1,15 @@
+# See OBS user guide, Usage > SCM/CI Workflow Integration > OBS Workflows
+# This workflow is triggered on push to GitHub.
+
+trigger_rescan:
+  filters:
+    event: push
+    branches:
+      only:
+      - generated
+  steps:
+  - set_flags:
+      flags:
+      - type: build
+        status: enable
+        project: home:mook:ryujinx:dotnet
