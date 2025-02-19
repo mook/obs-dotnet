@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -17,8 +18,20 @@ import (
 	"github.com/mook/obs-dotnet/generate-packages/pkg/httpfs"
 	"github.com/mook/obs-dotnet/generate-packages/pkg/repomd"
 	"github.com/mook/obs-dotnet/generate-packages/pkg/rpm"
-	"github.com/mook/obs-dotnet/generate-packages/pkg/utils"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
+)
+
+var (
+	//go:embed overrides.yaml
+	overridesRaw  []byte
+	loadOverrides = sync.OnceValues(func() (map[string]map[string]string, error) {
+		var result map[string]map[string]string
+		if err := yaml.Unmarshal(overridesRaw, &result); err != nil {
+			return nil, err
+		}
+		return result, nil
+	})
 )
 
 // packageWriter writes out a package definition
@@ -123,6 +136,10 @@ func (w *packageWriter) download(pkgDir string) (string, error) {
 }
 
 func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) error {
+	overrides, err := loadOverrides()
+	if err != nil {
+		return fmt.Errorf("failed to load overrides: %w", err)
+	}
 	specPath := filepath.Join(pkgDir, w.pkg.Name+".spec")
 	// rpmrebuild emits log lines starting with `(GenRpmQf)` in stdout, so we
 	// have to tell it to write to a file instead.
@@ -149,7 +166,6 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 		return fmt.Errorf("failed to read generated RPM spec: %w", err)
 	}
 
-	rpmName := filepath.Base(rpmPath)
 	lines := strings.Split(string(buf), "\n")
 
 	// Write the changelog to a separate file
@@ -161,16 +177,27 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 		lines = lines[:changelogIndex+1]
 	}
 
-	lines = utils.InsertLines(lines, []string{
-		"BuildRequires: rpm",
-		fmt.Sprintf("Source: %s", rpmName),
-	}, regexp.MustCompile(`^%description`), true)
-
-	lines = utils.InsertLines(lines, []string{
-		"%install",
-		"set -x",
-		fmt.Sprintf("rpm2cpio %%{_sourcedir}/%s | cpio --extract --make-directories --preserve-modification-time --verbose --directory %%{buildroot}", rpmName),
-	}, regexp.MustCompile(`^%files`), true)
+	for topLevel, overrideMapping := range overrides {
+		match, err := path.Match(topLevel, w.pkg.Name)
+		if err != nil {
+			return fmt.Errorf("failed to read override: %q is a bad glob", topLevel)
+		}
+		if !match {
+			continue
+		}
+		for needle, additions := range overrideMapping {
+			index := slices.Index(lines, needle)
+			if index < 0 {
+				return fmt.Errorf("failed to locate %q in %s spec", needle, w.pkg.Name)
+			}
+			lines = append(
+				lines[:index],
+				append(
+					strings.Split(additions, "\n"),
+					lines[index:]...)...,
+			)
+		}
+	}
 
 	if err := os.WriteFile(specPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return fmt.Errorf("failed to write RPM spec file: %w", err)

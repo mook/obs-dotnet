@@ -1,0 +1,25 @@
+# This file contains extra lines to insert into the generated spec files.
+# The top level key is matched against the package name using path.Match.
+# The secondary key is the line before which text is to be inserted.
+# The value is the lines to insert.
+
+"*":
+  "%description": |
+    BuildRequires: rpm
+  "%files": |
+    %prep
+    cp %{S:0} input.rpm
+    %build
+    %install
+    rpm2cpio input.rpm | cpio --extract --make-directories --preserve-modification-time --verbose --directory %{buildroot}
+
+dotnet-runtime-deps-9.0:
+  "%changelog": |
+    %dir %attr(0755, root, root) "/usr/share/doc/%{name}"
+
+dotnet-runtime-9.0:
+  "%description": |
+    BuildRequires: dotnet-runtime-deps-9.0
+  "%changelog": |
+    %dir %attr(0755, root, root) "/usr/share/dotnet/shared"
+    %dir %attr(0755, root, root) "/usr/share/doc/%{name}"
