@@ -5,13 +5,13 @@
 
 "*":
   "%description": |
+    Source: %{rpm_url}
     BuildRequires: rpm
   "%files": |
     %prep
-    cp %{S:0} input.rpm
     %build
     %install
-    rpm2cpio input.rpm | cpio --extract --make-directories --preserve-modification-time --verbose --directory %{buildroot}
+    rpm2cpio %{S:0} | cpio --extract --make-directories --preserve-modification-time --verbose --directory %{buildroot}
 
 dotnet-runtime-deps-9.0:
   "%changelog": |

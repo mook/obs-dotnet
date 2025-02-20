@@ -166,7 +166,8 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 		return fmt.Errorf("failed to read generated RPM spec: %w", err)
 	}
 
-	lines := strings.Split(string(buf), "\n")
+	lines := []string{"%define rpm_url " + w.fs.BuildURL(w.pkg.Location.HRef).String()}
+	lines = append(lines, strings.Split(string(buf), "\n")...)
 
 	// Write the changelog to a separate file
 	changelogIndex := slices.Index(lines, "%changelog")
@@ -230,12 +231,7 @@ func (w *packageWriter) writeService(pkgDir string) error {
 	service := serviceTemplate{
 		Services: []serviceElement{
 			{Name: "format_spec_file"},
-			{
-				Name: "download_url",
-				Params: []serviceParam{
-					{Name: "url", Value: w.fs.BuildURL(w.pkg.Location.HRef).String()},
-				},
-			},
+			{Name: "download_files"},
 		},
 	}
 	buf, err := xml.MarshalIndent(service, "", "  ")
