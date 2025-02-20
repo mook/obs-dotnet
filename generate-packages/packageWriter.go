@@ -69,6 +69,10 @@ func (w *packageWriter) write(ctx context.Context, pkgs []*repomd.PrimaryPackage
 				return w.writeService(pkgDir)
 			})
 
+			group.Go(func() error {
+				return w.writeLintConfig(pkgDir)
+			})
+
 			return nil
 		})
 		var wantedPackages []rpm.Entry
@@ -172,7 +176,7 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 	// Write the changelog to a separate file
 	changelogIndex := slices.Index(lines, "%changelog")
 	if changelogIndex >= 0 {
-		if err = w.writeChangelog(ctx, pkgDir, lines[changelogIndex+1:]); err != nil {
+		if err = w.writeChangelog(pkgDir, lines[changelogIndex+1:]); err != nil {
 			return fmt.Errorf("failed to write changelog: %w", err)
 		}
 		lines = lines[:changelogIndex+1]
@@ -206,9 +210,20 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 	return nil
 }
 
-func (w *packageWriter) writeChangelog(ctx context.Context, pkgDir string, lines []string) error {
+func (w *packageWriter) writeChangelog(pkgDir string, lines []string) error {
 	changelogPath := filepath.Join(pkgDir, fmt.Sprintf("%s.changes", w.pkg.Name))
 	return os.WriteFile(changelogPath, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+func (w *packageWriter) writeLintConfig(pkgDir string) error {
+	var lines []string
+	for _, checkName := range []string{
+		"arch-dependent-file-in-usr-share",
+	} {
+		lines = append(lines, fmt.Sprintf("setBadness('%s', 0)", checkName))
+	}
+	configPath := filepath.Join(pkgDir, fmt.Sprintf("%s-rpmlintrc", w.pkg.Name))
+	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 type serviceParam struct {
