@@ -1,25 +1,82 @@
 # This file contains extra lines to insert into the generated spec files.
 # The top level key is matched against the package name using path.Match.
-# The secondary key is the line before which text is to be inserted.
-# The value is the lines to insert.
+# The secondary key is the RPM spec file section; "%preamble" is a special name
+# for the unnamed preamble section.
+# That has two properties, "weight" (larger values go later), and "lines" which
+# contain the lines to be inserted.
 
 "*":
-  "%description": |
-    Source: %{rpm_url}
-    BuildRequires: rpm
-  "%files": |
-    %prep
-    %build
-    %install
-    rpm2cpio %{S:0} | cpio --extract --make-directories --preserve-modification-time --verbose --directory %{buildroot}
+  "%preamble":
+    weight: 100
+    lines: |
+      Source: %{rpm_url}
+      BuildRequires: rpm
+      %prep
+      %build
+      %install
+      rpm2cpio %{S:0} | cpio --extract --make-directories --preserve-modification-time --verbose --directory %{buildroot}
+  "%files":
+    weight: -100
+    lines: |
+      %defattr(0644, root, root, 0755)
 
 dotnet-runtime-deps-9.0:
-  "%changelog": |
-    %dir %attr(0755, root, root) "/usr/share/doc/%{name}"
+  "%files":
+    lines: |
+      %dir "/usr/share/doc/%{name}"
 
 dotnet-runtime-9.0:
-  "%description": |
-    BuildRequires: dotnet-runtime-deps-9.0
-  "%changelog": |
-    %dir %attr(0755, root, root) "/usr/share/dotnet/shared"
-    %dir %attr(0755, root, root) "/usr/share/doc/%{name}"
+  "%preamble":
+    lines: |
+      BuildRequires: dotnet-runtime-deps-9.0
+  "%files":
+    lines: |
+      %dir "/usr/share/dotnet/shared"
+      %dir "/usr/share/doc/%{name}"
+
+dotnet-sdk-9.0:
+  "%preamble":
+    lines: |
+      BuildRequires: dotnet-runtime-deps-9.0
+  "%files":
+    lines: |
+      "/usr/share/dotnet/sdk-manifests"
+      "/usr/share/dotnet/templates"
+
+aspnetcore-runtime-9.0:
+  "%preamble":
+    lines: |
+      BuildRequires: dotnet-runtime-deps-9.0
+  "%files":
+    lines: |
+      %dir "/usr/share/dotnet/shared"
+
+aspnetcore-targeting-pack-9.0:
+  "%files":
+    lines: |
+      %dir "/usr/share/dotnet"
+      %dir "/usr/share/dotnet/packs"
+
+dotnet-apphost-pack-9.0:
+  "%files":
+    lines: |
+      %dir "/usr/share/doc/%{name}"
+      %dir "/usr/share/dotnet"
+      %dir "/usr/share/dotnet/packs"
+      "/usr/share/dotnet/packs/Microsoft.NETCore.App.Host.linux-x64"
+
+dotnet-targeting-pack-9.0:
+  "%files":
+    lines: |
+      %dir "/usr/share/doc/%{name}"
+      %dir "/usr/share/dotnet"
+      %dir "/usr/share/dotnet/packs"
+      "/usr/share/dotnet/packs/Microsoft.NETCore.App.Ref"
+
+netstandard-targeting-pack-2.1:
+  "%files":
+    lines: |
+      %dir "/usr/share/doc/%{name}"
+      %dir "/usr/share/dotnet"
+      %dir "/usr/share/dotnet/packs"
+      "/usr/share/dotnet/packs/NETStandard.Library.Ref"

@@ -22,11 +22,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type overrideEntry struct {
+	Weight int    `yaml:"weight,omitempty"`
+	Lines  string `yaml:"lines"`
+}
+
 var (
 	//go:embed overrides.yaml
 	overridesRaw  []byte
-	loadOverrides = sync.OnceValues(func() (map[string]map[string]string, error) {
-		var result map[string]map[string]string
+	loadOverrides = sync.OnceValues(func() (map[string]map[string]overrideEntry, error) {
+		var result map[string]map[string]overrideEntry
 		if err := yaml.Unmarshal(overridesRaw, &result); err != nil {
 			return nil, err
 		}
@@ -139,11 +144,28 @@ func (w *packageWriter) download(pkgDir string) (string, error) {
 	return outPath, nil
 }
 
+// rpmSectionHeaders contain the names of the RPM section headers (including the
+// leading percent sign).  We use this list to detect when a section has ended
+// so we can insert any lines we need into the end of the previous section.
+// Note that %description is a sub-section, but we need to insert lines into the
+// preamble before it, so we consider it a section.
+const rpmSectionHeaders = `
+	%description
+	%prep
+	%build
+	%install
+	%check
+	%files
+	%changelog
+	%verify
+	%pre %post %preun %postun
+	%pretrans %posttrans %preuntrans %postuntrans
+	%triggerprein %triggerin %triggerun %triggerpostun
+	%filetriggerin %filetriggerun %filetriggerpostun
+	%transfiletriggerin %transfiletriggerun %transfiletriggerpostun
+	`
+
 func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) error {
-	overrides, err := loadOverrides()
-	if err != nil {
-		return fmt.Errorf("failed to load overrides: %w", err)
-	}
 	specPath := filepath.Join(pkgDir, w.pkg.Name+".spec")
 	// rpmrebuild emits log lines starting with `(GenRpmQf)` in stdout, so we
 	// have to tell it to write to a file instead.
@@ -158,9 +180,9 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 	cmd := exec.CommandContext(ctx, "rpmrebuild",
 		"--spec-only="+tempSpec.Name(),
 		"--package", rpmPath)
-	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if slog.Default().Enabled(ctx, slog.LevelDebug) {
-		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
 	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to generate RPM spec file: %w", err)
@@ -170,6 +192,7 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 		return fmt.Errorf("failed to read generated RPM spec: %w", err)
 	}
 
+	// Insert a %define rpm_url so we can reference it later.
 	lines := []string{"%define rpm_url " + w.fs.BuildURL(w.pkg.Location.HRef).String()}
 	lines = append(lines, strings.Split(string(buf), "\n")...)
 
@@ -182,32 +205,72 @@ func (w *packageWriter) writeSpec(ctx context.Context, pkgDir, rpmPath string) e
 		lines = lines[:changelogIndex+1]
 	}
 
-	for topLevel, overrideMapping := range overrides {
-		match, err := path.Match(topLevel, w.pkg.Name)
-		if err != nil {
-			return fmt.Errorf("failed to read override: %q is a bad glob", topLevel)
-		}
-		if !match {
-			continue
-		}
-		for needle, additions := range overrideMapping {
-			index := slices.Index(lines, needle)
-			if index < 0 {
-				return fmt.Errorf("failed to locate %q in %s spec", needle, w.pkg.Name)
-			}
-			lines = append(
-				lines[:index],
-				append(
-					strings.Split(additions, "\n"),
-					lines[index:]...)...,
-			)
-		}
+	if lines, err = w.overrideSpec(lines); err != nil {
+		return err
 	}
 
 	if err := os.WriteFile(specPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return fmt.Errorf("failed to write RPM spec file: %w", err)
 	}
 	return nil
+}
+
+// overrideSpec modifies the lines of the spec file according to the configuration
+// in overrides.yaml.
+func (w *packageWriter) overrideSpec(lines []string) ([]string, error) {
+	rpmSectionHeaderMap := map[string]struct{}{"%preamble": {}}
+	for _, header := range strings.Fields(rpmSectionHeaders) {
+		rpmSectionHeaderMap[header] = struct{}{}
+	}
+
+	allOverrides, err := loadOverrides()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load overrides: %w", err)
+	}
+
+	// Load overrides matching this package
+	overridesData := make(map[string][]overrideEntry)
+	for packageGlob, entries := range allOverrides {
+		match, err := path.Match(packageGlob, w.pkg.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read override: %q is a bad glob", packageGlob)
+		}
+		if match {
+			for section, entry := range entries {
+				if _, ok := rpmSectionHeaderMap[section]; !ok {
+					return nil, fmt.Errorf("override %s section %s is invalid", packageGlob, section)
+				}
+				overridesData[section] = append(overridesData[section], entry)
+			}
+		}
+	}
+	overrides := make(map[string][]string)
+	for k, v := range overridesData {
+		slices.SortFunc(v, func(a, b overrideEntry) int {
+			return a.Weight - b.Weight
+		})
+		for _, entry := range v {
+			overrides[k] = append(overrides[k], strings.Split(entry.Lines, "\n")...)
+		}
+	}
+
+	// Go through each line and check for overrides
+	section := "%preamble"
+	result := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for word := range strings.FieldsSeq(line) {
+			if _, ok := rpmSectionHeaderMap[word]; ok {
+				// The line starts a new section; insert the lines and change
+				// sections.
+				result = append(result, overrides[section]...)
+				section = word
+			}
+			break
+		}
+		result = append(result, line)
+	}
+
+	return append(result, overrides[section]...), nil
 }
 
 func (w *packageWriter) writeChangelog(pkgDir string, lines []string) error {
