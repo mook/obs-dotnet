@@ -2,7 +2,12 @@ name: Generate OBS Project
 on:
   push:
     branches: main
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Override SDK version
+        default: ""
+        type: string
 jobs:
   generate:
     runs-on: ubuntu-latest
@@ -36,7 +41,7 @@ jobs:
       run: go build -o ../../generate-packages
       working-directory: src/generate-packages
     - name: Regenerate
-      run: ../generate-packages
+      run: ../generate-packages -verbose -version=${{ inputs.version }}
       working-directory: out
     - name: Commit changes
       working-directory: out

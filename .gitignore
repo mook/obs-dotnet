@@ -1,2 +1,5 @@
 .osc/
 *.rpm
+/aspnetcore-*/
+/dotnet-*/
+/netstandard-*/

@@ -80,18 +80,34 @@ func (w *packageWriter) write(ctx context.Context, pkgs []*repomd.PrimaryPackage
 
 			return nil
 		})
-		var wantedPackages []rpm.Entry
-		for _, list := range [][]rpm.Entry{
+		wantedPackages := slices.Concat(
 			w.pkg.Format.Requires,
 			w.pkg.Format.Suggests,
 			w.pkg.Format.Recommends,
 			w.pkg.Format.Supplements,
 			w.pkg.Format.Enhances,
-		} {
-			wantedPackages = append(wantedPackages, list...)
-		}
+		)
 		for _, nextEntry := range wantedPackages {
-			pkg := findPackage(pkgs, nextEntry)
+			var pkg *repomd.PrimaryPackage
+			if w.pkg.Name == initialPackage && options.version.Ver != "" {
+				// If we're looking at the initial package, set the version of
+				// its dependencies if possible.
+				if nextEntry.Ver == "" {
+					modifiedEntry := nextEntry
+					modifiedEntry.Version = options.version
+					modifiedEntry.Flags = rpm.EQ
+					slog.DebugContext(ctx, "checking override", "override", modifiedEntry)
+					pkg = findPackage(pkgs, modifiedEntry)
+				}
+				if pkg == nil {
+					// If we can't find the override version, fallback to using
+					// the default version.
+					slog.DebugContext(ctx, "failed to find override", "fallback", nextEntry)
+					pkg = findPackage(pkgs, nextEntry)
+				}
+			} else {
+				pkg = findPackage(pkgs, nextEntry)
+			}
 			if pkg != nil {
 				var ok bool
 				newWriter := &packageWriter{pkg: pkg, fs: w.fs}

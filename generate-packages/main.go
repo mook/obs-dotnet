@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,13 +17,33 @@ import (
 )
 
 const (
-	repository = "https://packages.microsoft.com/opensuse/15/prod/"
-	repoMeta   = "prod.repo"
+	repository     = "https://packages.microsoft.com/opensuse/15/prod/"
+	repoMeta       = "prod.repo"
+	initialPackage = "dotnet-sdk-9.0"
 )
 
-var packages struct {
-	sync.Mutex
-	mapping map[string]*packageWriter
+var (
+	options struct {
+		verbose bool
+		version rpm.Version
+	}
+
+	packages struct {
+		sync.Mutex
+		mapping map[string]*packageWriter
+	}
+)
+
+func parseFlags() {
+	flag.BoolVar(&options.verbose, "verbose", false, "enable extra logging")
+	flag.Var(&options.version, "version", "override sdk version")
+	flag.Parse()
+	if options.version.Epoch != nil && *options.version.Epoch == 0 {
+		options.version.Epoch = nil
+	}
+	if options.version.Rel != nil && *options.version.Rel == "" {
+		options.version.Rel = nil
+	}
 }
 
 func findPackage(pkgs []*repomd.PrimaryPackage, entry rpm.Entry) *repomd.PrimaryPackage {
@@ -40,7 +61,12 @@ func findPackage(pkgs []*repomd.PrimaryPackage, entry rpm.Entry) *repomd.Primary
 }
 
 func run(ctx context.Context) error {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	parseFlags()
+	logOptions := &slog.HandlerOptions{}
+	if options.verbose {
+		logOptions.Level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, logOptions)))
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to find executable: %w", err)
@@ -58,10 +84,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("error parsing repo: %w", err)
 	}
 	initalPkg := findPackage(primary.Packages, rpm.Entry{
-		Name: "dotnet-sdk-9.0",
+		Name: initialPackage,
 	})
-	if err != nil {
-		return fmt.Errorf("failed to get dotnet-sdk package: %w", err)
+	if initalPkg == nil {
+		return fmt.Errorf("failed to get initial package %s", initialPackage)
 	}
 	writer := &packageWriter{pkg: initalPkg, fs: fs}
 	packages.Lock()

@@ -12,14 +12,19 @@ var (
 
 // Compare two RPM versions, returning -1 if a < b, 1 if a > b, 0 if equal.
 func Compare(a, b Version) int {
-	if a.Epoch != b.Epoch {
-		// If epochs are different, compare them.
-		return cmp.Compare(a.Epoch, b.Epoch)
+	if a.Epoch != nil && b.Epoch != nil {
+		if *a.Epoch != *b.Epoch {
+			// If epochs are different, compare them.
+			return cmp.Compare(*a.Epoch, *b.Epoch)
+		}
 	}
 	if a.Ver != b.Ver {
 		return comparePart(a.Ver, b.Ver)
 	}
-	return comparePart(a.Rel, b.Rel)
+	if a.Rel != nil && b.Rel != nil {
+		return comparePart(*a.Rel, *b.Rel)
+	}
+	return 0
 }
 
 func isDigit(c byte) bool {
