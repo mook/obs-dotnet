@@ -89,9 +89,8 @@ func (w *packageWriter) write(ctx context.Context, pkgs []*repomd.PrimaryPackage
 		)
 		for _, nextEntry := range wantedPackages {
 			var pkg *repomd.PrimaryPackage
-			if w.pkg.Name == initialPackage && options.version.Ver != "" {
-				// If we're looking at the initial package, set the version of
-				// its dependencies if possible.
+			if options.version.Ver != "" {
+				// For all packages, try to use the override version if possible.
 				if nextEntry.Ver == "" {
 					modifiedEntry := nextEntry
 					modifiedEntry.Version = options.version

@@ -14,6 +14,7 @@ import (
 	"github.com/mook/obs-dotnet/generate-packages/pkg/repomd"
 	"github.com/mook/obs-dotnet/generate-packages/pkg/rpm"
 	"github.com/mook/obs-dotnet/generate-packages/pkg/utils"
+	"github.com/mook/obs-dotnet/generate-packages/pkg/versions"
 )
 
 const (
@@ -24,8 +25,9 @@ const (
 
 var (
 	options struct {
-		verbose bool
-		version rpm.Version
+		verbose    bool
+		version    rpm.Version
+		sdkVersion rpm.Version
 	}
 
 	packages struct {
@@ -38,12 +40,18 @@ func parseFlags() {
 	flag.BoolVar(&options.verbose, "verbose", false, "enable extra logging")
 	flag.Var(&options.version, "version", "override sdk version")
 	flag.Parse()
-	if options.version.Epoch != nil && *options.version.Epoch == 0 {
-		options.version.Epoch = nil
+}
+
+func fetchSDKVersion(ctx context.Context) error {
+	if options.version.Ver == "" {
+		// No version set, do not set SDK version.
+		return nil
 	}
-	if options.version.Rel != nil && *options.version.Rel == "" {
-		options.version.Rel = nil
+	sdkVersion, err := versions.FetchSDKVersion(ctx, options.version.Ver)
+	if err != nil {
+		return err
 	}
+	return options.sdkVersion.Set(sdkVersion)
 }
 
 func findPackage(pkgs []*repomd.PrimaryPackage, entry rpm.Entry) *repomd.PrimaryPackage {
@@ -67,6 +75,11 @@ func run(ctx context.Context) error {
 		logOptions.Level = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, logOptions)))
+
+	if err := fetchSDKVersion(ctx); err != nil {
+		return err
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to find executable: %w", err)
@@ -83,16 +96,29 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error parsing repo: %w", err)
 	}
-	initalPkg := findPackage(primary.Packages, rpm.Entry{
-		Name: initialPackage,
-	})
-	if initalPkg == nil {
+
+	var initialPkg *repomd.PrimaryPackage
+	if options.sdkVersion.Ver != "" {
+		// We have an override for the SDK version, try to use it.
+		initialPkg = findPackage(primary.Packages, rpm.Entry{
+			Name:    initialPackage,
+			Version: options.sdkVersion,
+			Flags:   rpm.EQ,
+		})
+		slog.DebugContext(ctx, "trying SDK version override", "version", options.sdkVersion, "pkg", initialPkg)
+	}
+	if initialPkg == nil {
+		initialPkg = findPackage(primary.Packages, rpm.Entry{
+			Name: initialPackage,
+		})
+	}
+	if initialPkg == nil {
 		return fmt.Errorf("failed to get initial package %s", initialPackage)
 	}
-	writer := &packageWriter{pkg: initalPkg, fs: fs}
+	writer := &packageWriter{pkg: initialPkg, fs: fs}
 	packages.Lock()
 	packages.mapping = make(map[string]*packageWriter)
-	packages.mapping[initalPkg.Name] = writer
+	packages.mapping[initialPkg.Name] = writer
 	packages.Unlock()
 	return writer.write(ctx, primary.Packages)
 }

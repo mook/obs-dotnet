@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/mook/obs-dotnet/generate-packages/pkg/utils"
 )
 
 // Versions in RPM; epoch and release are optional for matching purposes.
@@ -24,26 +26,23 @@ func (v *Version) String() string {
 	return result
 }
 
+// Set a version from an input string, implementing [flag.Value].
+// The version may hav nil values for epoch and release.
 func (v *Version) Set(input string) error {
 	if epochIndex := strings.Index(input, ":"); epochIndex >= 0 {
 		epoch, err := strconv.ParseUint(input[:epochIndex], 10, 64)
 		if err != nil {
 			return fmt.Errorf("failed to parse epoch from %s: %w", input, err)
 		}
-		if epoch < 0 {
-			return fmt.Errorf("failed to parse epoch from %s: negative epoch", input)
-		}
 		v.Epoch = &epoch
 		input = input[epochIndex+1:]
 	}
-	rel := ""
 	if relIndex := strings.Index(input, "-"); relIndex >= 0 {
 		v.Ver = input[:relIndex]
-		rel = input[relIndex+1:]
+		v.Rel = utils.Ptr(input[relIndex+1:])
 	} else {
 		v.Ver = input
 	}
-	v.Rel = &rel
 	return nil
 }
 
@@ -51,6 +50,14 @@ func (v *Version) Set(input string) error {
 // defaulting to zero and empty respectively.
 func ParseVersion(input string) (*Version, error) {
 	v := &Version{}
-	err := v.Set(input)
-	return v, err
+	if err := v.Set(input); err != nil {
+		return nil, err
+	}
+	if v.Epoch == nil {
+		v.Epoch = utils.Ptr(uint64(0))
+	}
+	if v.Rel == nil {
+		v.Rel = utils.Ptr("")
+	}
+	return v, nil
 }
